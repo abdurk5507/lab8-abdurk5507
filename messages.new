@@ -9,8 +9,10 @@ version:7 toPort:32015 msg:"Spongebob, what's with all the ruckus?"
 version:5 TTL:5 toPort:33042 msg:"What you're doing is throwing away me money!" 
 version:6 toPort:32007 msg:"You've got it set to M for mini when it should be set to W for Wumbo." 
 version:7 toPort:32007 move:4 msg:"Another day, another migraine."
-version:7 toPort:36015 msg:"Spongebob, what's with all the ruckus?" 
-
+version:8 toPort:36015 msg:"Spongebob, what's with all the ruckus?" 
+version:8 toPort:36015 msg:"How many squirrels does it take to screw in a lightbulb?"
+version:8 toPort:36015 msg:"Wooh"  
+toPort:36007 version:8 move:7
 
 line:2 version:4 destination:100 TTL:100 cmd:send date:12-1-1 msg:"this should work" port:20000 location:18
 line:3 version:4 destination:100 TTL:100 cmd:send date:12-1-1 msg:"this should NOT work" port:20000 location:100

@@ -9,12 +9,13 @@
 #include <ctype.h>
 #include <math.h>
 #include <stdbool.h>
+#include <time.h>
 
-//Homework 6
+//Homework 8
 //Abdur Khan
 //105071067
 
-#define CURRENTVERSION 7
+#define CURRENTVERSION 8
 #define MAXPARTNERS 100
 #define STDIN 0
 #define TTL 6
@@ -25,7 +26,9 @@
 //#define LAB5_TESTING
 //#define LAB6_TESTING
 //#define LAB7_TESTING
+//#define LAB8_TESTING
 #define MAXSEQNUMBER 100
+#define STOREDMESSAGETOTAL 20
 
 #define destPORT "toPort"
 #define SOURCEPORT "fromPort"
@@ -53,10 +56,19 @@ struct  _tokens {
   char value[100];
 };
 
+struct _messages{
+  char message[200];
+  int hopsRemaining; //TTL is 5
+};
+
 fd_set socketFDS; // the socket descriptor set
 int maxSD; // tells the OS how many sockets are set
 int ROWS, COLUMNS;
+static int messagesIndex = 0;
+
+#ifdef LAB7_TESTING
 static int sendPathCount = 0;
+#endif
 
 int readConfigFile(struct _partners *Partners, int myPortNumber, int *myLoc);
 void printPartners (struct _partners *Partners);
@@ -88,12 +100,14 @@ int findXYCoordinates(int squareNumber, int *row, int *columns);
 void updateTTL(struct _tokens *tokens, int numberOfTokens, char *buffer);
 int returnTTL(struct _tokens *tokens, int numberOfTokens);
 
-void forwardSend(char *buffer, int sd, struct _partners Partners, struct _tokens *tokens, int numberOfTokens, int myLoc,int myPort);
+void forwardSend(char *buffer, int sd, struct _partners Partners, struct _tokens *tokens, int numberOfTokens,int myLoc, int myPort, struct _messages *storedBuffer);
 int checkIP(char *IP2Check);
 int validIP(char *anIPAddress);
 int validNum(char * aNumber);
 void checkPortNum(int portNumber);
 void makeSimpleSocket(int *sd);
+void reSend(struct _messages *storedBuffer, int sd, struct _partners Partners, int myPort, int myLoc);
+int isDuplicate(char message, struct _partners Partners, struct _tokens *tokens, struct _messages *storedBuffer);
 
 int main(int argc, char *argv[]){
   int socketDescriptor; /* socket descriptor */
@@ -107,10 +121,12 @@ int main(int argc, char *argv[]){
   struct sockaddr_in server_address; /* my address */
   struct sockaddr_in from_address;  /* address of sender */
   struct _tokens tokens [100];
+  struct _messages storedBuffer[STOREDMESSAGETOTAL];
+  struct timeval timeout;
 
   char buffer[1000];
   char buffer2Send[1000];
-  char updateSendPath[100];
+  //char updateSendPath[100];
   
   //Check all input parameters
   //Switched to what Dr. Ogle was doing and took in rows and columns at CLI
@@ -161,307 +177,392 @@ int main(int argc, char *argv[]){
       maxSD = STDIN;
     else
       maxSD = socketDescriptor;
+
+    //timeout values
+    timeout.tv_sec = 20;
+    timeout.tv_usec = 0;
     
     // NEW block until something arrives
-    returnCode = select (maxSD+1, &socketFDS, NULL, NULL, NULL); 
+    returnCode = select (maxSD+1, &socketFDS, NULL, NULL, &timeout); 
 
     #ifdef TESTING
     printf ("select popped\n");
     #endif
 
-    if (FD_ISSET(STDIN, &socketFDS)){
-      char *ptr = NULL;
-      memset (buffer, '\0', 200);
-      memset (buffer2Send, '\0', 300);
-      ptr = fgets(buffer, sizeof(buffer), stdin);
-      
-      if (strlen(buffer)>200){
-        printf ("HELLO - you are sending too many bytes, please reduce\n");
-        continue;
-      }
-      if (strlen(buffer)<1){
-        printf ("HELLO - you are sending too few bytes, please increase\n");
-        exit(1);
+    if(returnCode == 0){ //had a timeout!
+      //Add a function here that resends the messages to all partners
+      //while decremeneting ttl
 
-      }
-
-      /* Lab 6 - find the toPort - use it to figure out partner */
-      /* Lab 6 - then add the seqNumber stuff. */
-      //Keeping the following the same. Can't say I understand it all, but it works
-      int length2Copy = 0;
-      char *ptrStart = strstr(buffer, "toPort:"); 
-      if (ptrStart == NULL){
-        printf ("no toPort, can't send it\n");
-        continue;
-      }
-      char *ptrColon = strstr(ptrStart,":"); 
-      char *ptrEnd = strstr(ptrStart, " "); 
-      if (ptrEnd == NULL) { 
-	      length2Copy = 6; 
-      }
-      else{
-	      length2Copy = ptrColon - ptrStart;
-      }
-      char toPortChar[6];
-      strncpy(toPortChar, ptrColon+1, length2Copy-1); // ignore colon and blank
-      int toPortInt = atoi(toPortChar);
-
-      int seqNumber2Add = findSeqNumber(toPortInt, &Partners);
-      #ifdef LAB7_TESTING
-      printf ("toPortInt is %d\n", toPortInt);
-      #endif
-      if (seqNumber2Add < 0){
-        printf ("Can't find partner for seqNumber \n");
-        continue;
-      }
-      /* End of the lab 6 addition */
-      
-      //Affix null pointer to the end of the buffer
-      buffer[strlen(buffer)-1] = '\0';
-
-      //Add additional values to the buffer
-      //Realized that I've been adding TTL in the initial message instead of doing so here
-      sprintf (buffer2Send, "%s fromPort:%d send-path:%d seqNumber:%d TTL:%d  location:%d",
-	       buffer, myPort, myPort, seqNumber2Add, TTL, myLoc);
-
-      #ifdef LAB5_TESTING
-      printf("After inputting it into the buffer, my location is %d\n", myLoc);
-
-      printf("buffer 2 send before first send: %s\n", buffer2Send);
-      #endif
-      
-      //Send data to other drones
-      clientSend(buffer2Send, socketDescriptor, Partners, myPort);
+      // I need to resend my messages
+      //To-Do: (Do in a for loop)
+      //1. Pull message from struct and put it in a buffer
+      //2. Decrement the timeToLive in the struct. If you need to make changes to the buffer, do so now.
+      //3. Send it out to everyone again
+      reSend(storedBuffer, socketDescriptor, Partners, myPort, myLoc);
+      printf("Timeout occurred!\n");
+      continue;
     }
-    if (FD_ISSET(socketDescriptor, &socketFDS)){ 
-      //Receive data
-      receiveMessage(buffer, socketDescriptor, &from_address);
+    else{
+      if (FD_ISSET(STDIN, &socketFDS)){
+        char *ptr = NULL;
+        memset (buffer, '\0', 200);
+        memset (buffer2Send, '\0', 300);
+        ptr = fgets(buffer, sizeof(buffer), stdin);
+        
+        if (strlen(buffer)>200){
+          printf ("HELLO - you are sending too many bytes, please reduce\n");
+          continue;
+        }
+        if (strlen(buffer)<1){
+          printf ("HELLO - you are sending too few bytes, please increase\n");
+          exit(1);
 
-      /* cleanse the data, meaning i have to take into account    */
-      /* there may be a msg...and that will have " as a delimeter */
-      cleanse (buffer);
+        }
 
-      numberOfTokens = findTokens (buffer, tokens);
-
-      //Look for port #s
-      destinationPort = findIntToken (tokens, numberOfTokens, destPORT);
-      sourcePort = findIntToken(tokens, numberOfTokens, SOURCEPORT);
-
-      //Check if port tokens were found 
-      if (destinationPort == -1 || sourcePort == -1){
-        #ifdef LAB6_TESTING
-        printf ("No source and/or dest port. Skip message.\n");
-        #endif
-        continue;
-      }
-      
-      //Find version # in message
-      version = findIntToken (tokens, numberOfTokens, "version");
-
-      //Check if version # was found
-      if (version == -1){
-        printf ("Didn't find a version in the string, skipping this message\n");
-        continue;
-      }
-
-      //Check version # against current version
-      if (version != CURRENTVERSION){
-        // token not found, continue
-        printf ("wrong version %d  skipping \n", version);
-        continue;
-      }
-
-      #ifdef TESTING
-      printf("Other location is %d\n", Partners.hostInfo[i].location);
-      printf("My location is %d\n", myLoc);
-      #endif
-
-      //Find location in message
-      senderLoc = findIntToken(tokens, numberOfTokens, "location");
-
-      if (senderLoc == -1){
-      	printf ("no location found %d  skipping \n", senderLoc);
-        continue;
-      }
-
-      //Obtain distance
-      int senderRow, senderColumn;
-      
-      //Have to use this function instead of isWithinRange
-      //Doesn't work with the rest of the code if I use the latter
-      returnCode = findXYCoordinates(senderLoc, &senderRow, &senderColumn);
-
-      if (returnCode == -1){
-        printf ("Location is not in the grid\n");
-        continue;
-      }
-
-      //Same here
-      distance = findDistance(senderRow, senderColumn, myRow, myColumn);
-
-      #ifdef LAB5_TESTING
-      printf ("the distance between you and sender is %d \n", distance);
-
-      if (distance <=2){
-        printf ("dest port is %d, my port is %d\n", destinationPort, myPort);
-      }
-      #endif
-      
-      
-      if (destinationPort == myPort){
-        //Older checks
-        if (distance > MAXDISTANCE){
-          #ifdef LAB4
-          printf("DARN\n");
-          #endif
+        /* Lab 6 - find the toPort - use it to figure out partner */
+        /* Lab 6 - then add the seqNumber stuff. */
+        //Keeping the following the same. Can't say I understand it all, but it works
+        int length2Copy = 0;
+        char *ptrStart = strstr(buffer, "toPort:"); 
+        if (ptrStart == NULL){
+          printf ("no toPort, can't send it\n");
+          continue;
+        }
+        char *ptrColon = strstr(ptrStart,":"); 
+        char *ptrEnd = strstr(ptrStart, " "); 
+        if (ptrEnd == NULL) { 
+          length2Copy = 6; 
         }
         else{
-          //Find the ACK
-          int partnerPos = findPartner(sourcePort, Partners);
-          int seqNum = findIntToken (tokens, numberOfTokens, SEQNUM);
-          char *isAck = findCharToken (tokens, numberOfTokens, "type");
-          
-          //Check if we found an ACK
-          if (isAck != NULL && !strcmp(isAck, "ACK")){
-            #ifdef LAB6_TESTING
-            printf ("Processing an ACK\n");
-            #endif
-
-            //Indicates that the partner has been found
-            //Saddle up, partner
-            if (partnerPos > -1){ 
-              if (Partners.hostInfo[partnerPos].hasAcked[seqNum] == true){
-                printf ("Received a duplicate ACK for SeqNum %d fromPort %d\n",
-                seqNum, sourcePort);
-                
-              }
-
-              else{
-                printf ("Received an ACK for SeqNum %d fromPort %d\n", seqNum, sourcePort);
-                Partners.hostInfo[partnerPos].hasAcked[seqNum] = true;
-                printTokens (tokens, numberOfTokens, myLoc);
-              }
-
-            }
-
-            //Partner was not found
-            else { 
-              printf ("Received an ACK for SeqNum %d fromPort %d but couldn't find partner\n",
-              seqNum, sourcePort);
-            }
-
-          }
-          else{
-            //Send an ACK back to sender
-            if (partnerPos > -1){
-              int i;
-              char buffer[200];
-
-              //Clear buffer before using
-              memset (buffer, 0, 200);
-
-              //Add fields to buffer
-              sprintf (buffer, "type:ACK version:%d send-path:%d TTL:%d  toPort:%d fromPort:%d seqNumber:%d  location:%d",
-                CURRENTVERSION, myPort, TTL, sourcePort, myPort, seqNum, myLoc);
-
-              for (i = 0;i < Partners.maxHosts;i++){
-                //Declare variables
-                int portNumber;
-                char serverIP[20];
-
-                //Clear buffer before using
-                memset (serverIP, 0, 20); 
-                portNumber = Partners.hostInfo[i].portNumber;
-
-                // don't forward to myself
-                //Can't believe the solution to this issue was so simple
-                if (portNumber == myPort){
-                  continue;
-                }
-
-                //Copy ipaddr to var
-                strcpy(serverIP, Partners.hostInfo[i].ipAddress);
-                
-                //Set server info
-                server_address.sin_family = AF_INET;
-                server_address.sin_port = htons(portNumber);
-                server_address.sin_addr.s_addr = inet_addr(serverIP);
-
-                //Send out info in buffer      
-                sendData(buffer, socketDescriptor, server_address);
-              }    
-              
-              //Check for duplicate packet
-              if (Partners.hostInfo[partnerPos].sentAck[seqNum] == true){
-                printf ("Duplicate packet detected! Duplication ACK being sent for ");
-                printf ("seq# %d, fromPort %d\n", seqNum, sourcePort);
-
-                //Print out send path here
-                int i;
-                for(i = 0; i < numberOfTokens; i++){
-                  if(strcmp(tokens[i].key, "send-path") == 0){
-                    printf("          Duplicate Packet Send-Path\n");
-                    printf ("%20s %20s\n\n", tokens[i].key, tokens[i].value);
-                  }
-                }
-              }
-
-              //Send ACK again
-              else{
-                printf ("Sending an ack for seqNum %d partner # %d, fromPort %d\n",
-                seqNum, partnerPos, sourcePort);
-                Partners.hostInfo[partnerPos].sentAck[seqNum] = true;
-                printTokens (tokens, numberOfTokens, myLoc);
-              }
-            }
-          } // end of else
-
-          //Handle the move command
-          char *moveCmd = findIntToken(tokens, numberOfTokens, "move");
-
-          //Move command not found
-          if (moveCmd == -1){
-            printf("Move command was not found\n");
-          }
-
-          //Move command found! Take action!
-          else{
-            #ifdef LAB7_TESTING
-            printf("I found the token for move\n");
-            printf("Move command is %d\n", moveCmd);
-            printf("My current location is %d\n", myLoc);
-            #endif
-
-            //Update my location to what is in the move command
-            myLoc = moveCmd;
-
-            #ifdef LAB7_TESTING
-            printf("Updated location is now %d\n", myLoc);
-            #endif
-          }
+          length2Copy = ptrColon - ptrStart;
         }
+        char toPortChar[6];
+        strncpy(toPortChar, ptrColon+1, length2Copy-1); // ignore colon and blank
+        int toPortInt = atoi(toPortChar);
+
+        int seqNumber2Add = findSeqNumber(toPortInt, &Partners);
+        #ifdef LAB7_TESTING
+        printf ("toPortInt is %d\n", toPortInt);
+        #endif
+        if (seqNumber2Add < 0){
+          printf ("Can't find partner for seqNumber \n");
+          continue;
+        }
+        /* End of the lab 6 addition */
+        
+        //Affix null pointer to the end of the buffer
+        buffer[strlen(buffer)-1] = '\0';
+
+        //Add additional values to the buffer
+        //Realized that I've been adding TTL in the initial message instead of doing so here
+        sprintf (buffer2Send, "%s fromPort:%d send-path:%d seqNumber:%d TTL:%d  location:%d",
+          buffer, myPort, myPort, seqNumber2Add, TTL, myLoc);
+
+        #ifdef LAB5_TESTING
+        printf("After inputting it into the buffer, my location is %d\n", myLoc);
+
+        printf("buffer 2 send before first send: %s\n", buffer2Send);
+        #endif
+        
+        //Send data to other drones
+        clientSend(buffer2Send, socketDescriptor, Partners, myPort);
       }
-      //Forward message
-      else {
-        int ttl;
+      if (FD_ISSET(socketDescriptor, &socketFDS)){ 
+        //Receive data
+        receiveMessage(buffer, socketDescriptor, &from_address);
 
-        //Find ttl token
-        ttl = findIntToken (tokens, numberOfTokens, "TTL");
+        /* cleanse the data, meaning i have to take into account    */
+        /* there may be a msg...and that will have " as a delimeter */
+        cleanse (buffer);
 
-        //Check if TTL is 0
-        if (TTL == 0){
-          printf ("message received NOT for me and msg out of lives!.\n");
+        numberOfTokens = findTokens (buffer, tokens);
+
+        //Look for port #s
+        destinationPort = findIntToken (tokens, numberOfTokens, destPORT);
+        sourcePort = findIntToken(tokens, numberOfTokens, SOURCEPORT);
+
+        //Check if port tokens were found 
+        if (destinationPort == -1 || sourcePort == -1){
+          #ifdef LAB6_TESTING
+          printf ("No source and/or dest port. Skip message.\n");
+          #endif
+          continue;
+        }
+        
+        //Find version # in message
+        version = findIntToken (tokens, numberOfTokens, "version");
+
+        //Check if version # was found
+        if (version == -1){
+          printf ("Didn't find a version in the string, skipping this message\n");
           continue;
         }
 
-        //Do optimization here
+        //Check version # against current version
+        if (version != CURRENTVERSION){
+          // token not found, continue
+          printf ("wrong version %d  skipping \n", version);
+          continue;
+        }
 
+        #ifdef TESTING
+        printf("Other location is %d\n", Partners.hostInfo[i].location);
+        printf("My location is %d\n", myLoc);
+        #endif
 
-        //Forward messages
-        forwardSend(buffer2Send, socketDescriptor, Partners, tokens,numberOfTokens, myLoc, myPort );
-	
+        //Find location in message
+        senderLoc = findIntToken(tokens, numberOfTokens, "location");
+
+        if (senderLoc == -1){
+          printf ("no location found %d  skipping \n", senderLoc);
+          continue;
+        }
+
+        //Obtain distance
+        int senderRow, senderColumn;
+        
+        //Have to use this function instead of isWithinRange
+        //Doesn't work with the rest of the code if I use the latter
+        returnCode = findXYCoordinates(senderLoc, &senderRow, &senderColumn);
+
+        if (returnCode == -1){
+          printf ("Location is not in the grid\n");
+          continue;
+        }
+
+        //Same here
+        distance = findDistance(senderRow, senderColumn, myRow, myColumn);
+
+        #ifdef LAB5_TESTING
+        printf ("the distance between you and sender is %d \n", distance);
+
+        if (distance <=2){
+          printf ("dest port is %d, my port is %d\n", destinationPort, myPort);
+        }
+        #endif
+        
+        
+        if (destinationPort == myPort){
+          //Older checks
+          if (distance > MAXDISTANCE){
+            #ifdef LAB4
+            printf("DARN\n");
+            #endif
+          }
+          else{
+            //Find the ACK
+            int partnerPos = findPartner(sourcePort, Partners);
+            int seqNum = findIntToken (tokens, numberOfTokens, SEQNUM);
+            char *isAck = findCharToken (tokens, numberOfTokens, "type");
+            
+            //Check if we found an ACK
+            if (isAck != NULL && !strcmp(isAck, "ACK")){
+              #ifdef LAB6_TESTING
+              printf ("Processing an ACK\n");
+              #endif
+
+              //Indicates that the partner has been found
+              //Saddle up, partner
+              if (partnerPos > -1){ 
+                if (Partners.hostInfo[partnerPos].hasAcked[seqNum] == true){
+                  printf ("Received a duplicate ACK for SeqNum %d fromPort %d\n",
+                  seqNum, sourcePort);
+                  
+                }
+
+                else{
+                  printf ("Received an ACK for SeqNum %d fromPort %d\n", seqNum, sourcePort);
+                  Partners.hostInfo[partnerPos].hasAcked[seqNum] = true;
+                  printTokens (tokens, numberOfTokens, myLoc);
+                }
+
+              }
+
+              //Partner was not found
+              else { 
+                printf ("Received an ACK for SeqNum %d fromPort %d but couldn't find partner\n",
+                seqNum, sourcePort);
+              }
+
+            }
+            else{
+              //Send an ACK back to sender
+              if (partnerPos > -1){
+                int i;
+                char buffer[200];
+
+                //Clear buffer before using
+                memset (buffer, 0, 200);
+
+                //Add fields to buffer
+                sprintf (buffer, "type:ACK version:%d send-path:%d TTL:%d  toPort:%d fromPort:%d seqNumber:%d  location:%d",
+                  CURRENTVERSION, myPort, TTL, sourcePort, myPort, seqNum, myLoc);
+
+                for (i = 0;i < Partners.maxHosts;i++){
+                  //Declare variables
+                  int portNumber;
+                  char serverIP[20];
+
+                  //Clear buffer before using
+                  memset (serverIP, 0, 20); 
+                  portNumber = Partners.hostInfo[i].portNumber;
+
+                  // don't forward to myself
+                  //Can't believe the solution to this issue was so simple
+                  if (portNumber == myPort){
+                    continue;
+                  }
+
+                  //Copy ipaddr to var
+                  strcpy(serverIP, Partners.hostInfo[i].ipAddress);
+                  
+                  //Set server info
+                  server_address.sin_family = AF_INET;
+                  server_address.sin_port = htons(portNumber);
+                  server_address.sin_addr.s_addr = inet_addr(serverIP);
+
+                  //Send out info in buffer      
+                  sendData(buffer, socketDescriptor, server_address);
+                }    
+                
+                //Check for duplicate packet
+                if (Partners.hostInfo[partnerPos].sentAck[seqNum] == true){
+                  printf ("Duplicate packet detected! Duplication ACK being sent for ");
+                  printf ("seq# %d, fromPort %d\n", seqNum, sourcePort);
+
+                  //Print out send path here
+                  int i;
+                  for(i = 0; i < numberOfTokens; i++){
+                    if(strcmp(tokens[i].key, "send-path") == 0){
+                      printf ("****************************************************\n");
+                      printf("           Duplicate Packet Send-Path\n");
+                      printf ("%20s %20s\n\n", tokens[i].key, tokens[i].value);
+                      printf ("****************************************************\n");
+                    }
+                  }
+                }
+
+                //Send ACK again
+                else{
+                  printf ("Sending an ack for seqNum %d partner # %d, fromPort %d\n",
+                  seqNum, partnerPos, sourcePort);
+                  Partners.hostInfo[partnerPos].sentAck[seqNum] = true;
+                  printTokens (tokens, numberOfTokens, myLoc);
+                }
+              }
+            } // end of else
+
+            //Handle the move command
+            int moveCmd = findIntToken(tokens, numberOfTokens, "move");
+            //was originally
+            //char *moveCmd
+
+            //Move command not found
+            if (moveCmd == -1){
+              printf("Move command was not found\n");
+            }
+
+            //Move command found! Take action!
+            else{
+              #ifdef LAB7_TESTING
+              printf("I found the token for move\n");
+              printf("Move command is %d\n", moveCmd);
+              printf("My current location is %d\n", myLoc);
+              #endif
+
+              //Update my location to what is in the move command
+              myLoc = moveCmd;
+
+              #ifdef LAB7_TESTING
+              printf("Updated location is now %d\n", myLoc);
+              #endif
+
+              #ifdef LAB8_TESTING
+              int i;
+              for(i = 0; i < STOREDMESSAGETOTAL; i++){
+                printf("This is message %d:\n", i);
+                printf(storedBuffer[i].message);
+                printf("\n");
+              }
+              #endif
+
+              //I need to update the location in the stored messages before I resend them.
+              //Tokenize
+              
+              int i;
+              int numberOfMessageTokens;
+              numberOfMessageTokens = findTokens(storedBuffer[0].message, tokens);
+
+              #ifdef LAB8_TESTING
+              for(i = 0; i < numberOfMessageTokens; i++){
+                printf ("%20s %20s\n", tokens[i].key, tokens[i].value);
+              }
+              #endif
+
+              //Update location in stored message
+              for(i = 0; i < numberOfMessageTokens; i++){
+                if(strcmp(tokens[i].key, "location") == 0){
+                  char convertedMoveCmd[10];
+                  sprintf(convertedMoveCmd, "%d", moveCmd);
+                  //memcpy(tokens[i].value, &moveCmd, sizeof(moveCmd));
+                  strcpy(tokens[i].value, convertedMoveCmd);
+                  printf("updated location in stored struct is %s\n", tokens[i].value);
+                }
+              }
+
+              #ifdef LAB8_TESTING
+              printf("Updated tokens:\n");
+              for(i = 0; i < numberOfMessageTokens; i++){
+                printf ("%20s %20s\n", tokens[i].key, tokens[i].value);
+              }
+              #endif
+
+              char tempBuffer[100];
+              //char overallBuffer[500];
+              memset(tempBuffer, 0, 100);
+              //Reinput values into buffer
+              for(i = 0; i < numberOfMessageTokens; i++){
+                sprintf(tempBuffer, "%s:%s%s", tokens[i].key, tokens[i].value, " ");
+                strcat(storedBuffer[0].message, tempBuffer);
+              }
+              //strcpy(storedBuffer[0].message, tempBuffer);
+              printf("Updated stored message is %s\n", storedBuffer[0].message);
+              //strcat(buffer, tempBuffer);
+              //memset(tempBuffer, 0, 100);
+
+              //Resend all messages after moving locations
+              reSend(storedBuffer, socketDescriptor, Partners, myPort, myLoc);
+
+              printf("Location moved! Resending all stored messages\n");
+
+              continue;
+            }
+          }
+        }
+        //Forward message
+        else {
+          int ttl;
+
+          //Find ttl token
+          ttl = findIntToken (tokens, numberOfTokens, "TTL");
+
+          //Check if TTL is 0
+          if (ttl == 0){
+            printf ("message received NOT for me and msg out of lives!.\n");
+            continue;
+          }
+          //Do optimization here
+          //Actually, this was done in clientSend()
+
+          //Do the message storage here before forwarding
+          //I may need to do it in the forward send function
+
+          //Forward messages
+          forwardSend(buffer2Send, socketDescriptor, Partners, tokens,numberOfTokens, myLoc, myPort, storedBuffer);
+    
+        }
       }
-    }
+    }  
   }
   return 0;
 }
@@ -707,7 +808,7 @@ void makeSimpleSocket(int *sd){
 /******************************************************************/
  void makeSocket(int *socketDescriptor, char *argv[], struct sockaddr_in *server_address, int* myPort){
 
-  int i; // loop variable
+  //int i; // loop variable
   int portNumber; // get this from command line
   int returnCode; // always need to check return codes!
   
@@ -1111,7 +1212,7 @@ void sendACK(int fromPort, int toPort, struct sockaddr_in *from_address, struct 
 */
 
 //Using this in place of the updateTTL(), recreateBuffer(), and clientSend() 
-void forwardSend(char *buffer, int sd, struct _partners Partners, struct _tokens *tokens, int numberOfTokens,int myLoc, int myPort){
+void forwardSend(char *buffer, int sd, struct _partners Partners, struct _tokens *tokens, int numberOfTokens,int myLoc, int myPort, struct _messages *storedBuffer){
   //Declare variables
   int i;
   struct sockaddr_in server_address; 
@@ -1128,6 +1229,7 @@ void forwardSend(char *buffer, int sd, struct _partners Partners, struct _tokens
   //Yikes, what an issue this causes
   //updateTTL(tokens, numberOfTokens, buffer);
   
+  //Decrement ttl
   for (i=0;i<numberOfTokens;i++){
     //handle the TTL field first
     if (strcmp(tokens[i].key, "TTL") == 0){
@@ -1157,6 +1259,30 @@ void forwardSend(char *buffer, int sd, struct _partners Partners, struct _tokens
     strcat(buffer, tempBuffer);
     memset(tempBuffer, 0, 100);
   }
+  
+  int isDup = -1;
+  //isDup = isDuplicate(buffer, Partners, tokens, storedBuffer);
+
+  //Store buffer into a messages struct
+  if(isDup != 1){
+    printf("Storing message\n");
+    memset(storedBuffer[messagesIndex].message, 0, 200);
+    strcpy(storedBuffer[messagesIndex].message, buffer);
+    #ifdef LAB8_TESTING
+    printf("Stored message is %s\n", storedBuffer->message);
+    #endif
+
+    //Assign hops remainig value
+    storedBuffer[messagesIndex].hopsRemaining = 5;
+    #ifdef LAB8_TESTING
+    printf("Hops remaining is %d\n", storedBuffer->hopsRemaining);
+    #endif
+
+    //Iterate index
+    messagesIndex = messagesIndex + 1 % STOREDMESSAGETOTAL;
+  }
+  
+
   // get rid of the last ' ' in the message
   //If only I knew this 3 labs ago
   buffer[strlen(buffer)-1] = 0;
@@ -1283,4 +1409,106 @@ void checkPortNum(int portNumber){
     printf ("You entered an invalid socket number!\n");
     exit(1);
   }
+}
+
+void reSend(struct _messages *storedBuffer, int sd, struct _partners Partners, int myPort, int myLoc){
+  int i;
+  for(i = 0; i < STOREDMESSAGETOTAL; i++){
+    if(storedBuffer[i].hopsRemaining == 0){
+      printf("Hops remaining equals zero for message %d. Leaving fxn\n", i);
+      return;
+    }
+    else{
+      char buffer[200];
+      
+      //Causing a seg fault
+      //printf("Move command is %c\n", moveCmd);
+
+      //Copy data from messages struct to buffer
+      strcpy(buffer, storedBuffer->message);
+
+      #ifdef LAB8_TESTING
+      //Test that it worked
+      printf("Copied buffer in resend fxn is %s\n", buffer);
+
+      printf("Hops begin at %d\n", storedBuffer->hopsRemaining);
+      #endif
+
+      //Decrement TTL in struct
+      storedBuffer->hopsRemaining--;
+
+      #ifdef LAB8_TESTING
+      //Test that decrement was successful
+      printf("Decremented hops is now %d\n", storedBuffer->hopsRemaining);
+      #endif
+
+      //Send out
+      clientSend(buffer, sd, Partners, myPort);
+    }
+  }
+}
+
+int isDuplicate(char message, struct _partners Partners, struct _tokens *tokens, struct _messages *storedBuffer){
+    // Extract the toPort, fromPort, and sequence number from the message
+    int seqNum, toPort, fromPort;
+    int numberOfTokens;
+    numberOfTokens = findTokens(&message, tokens);
+
+    #ifdef LAB8_TESTING
+    //Print tokens tokens to make sure it worked
+    printf("Printing tokens in isDuplicate fxn\n");
+    int i;
+    for (i=0;i<numberOfTokens;i++){
+      printf ("%20s %20s\n", tokens[i].key, tokens[i].value);
+    }
+    #endif
+
+    int i;
+    for (i=0;i<numberOfTokens;i++){
+      if(strcmp(tokens[i].key, "toPort") == 0){
+        toPort = atoi(tokens[i].value);
+      }
+      if(strcmp(tokens[i].key, "fromPort") == 0){
+        fromPort = atoi(tokens[i].value);
+      }
+      if(strcmp(tokens[i].key, "seqNumber") == 0){
+        seqNum = atoi(tokens[i].value);
+      }
+    }
+    //Print out values
+    #ifdef LAB8_TESTING
+    printf("seqNum is %d\n", seqNum);
+    printf("toPort is %d\n", toPort);
+    printf("fromPort is %d\n", fromPort);
+    #endif
+
+    int j;
+    int dupFlag = -1;
+    for(i = 0; i < STOREDMESSAGETOTAL; i++){
+        char* storedMessage = storedBuffer[i].message;
+        
+        numberOfTokens = findTokens(storedMessage, tokens);
+
+        for(j = 0; j < numberOfTokens; j++){
+          if (toPort == atoi(tokens[i].key)){
+            printf("Duplicate toPort found\n");
+            dupFlag = 1;
+          }
+          if(fromPort == atoi(tokens[i].key)){
+            printf("Duplicate fromPort found\n");
+            dupFlag = 1;
+          }
+          if(seqNum == atoi(tokens[i].key)){
+            printf("Duplicate seq num found\n");
+            dupFlag = 1;
+          }
+        }
+    }
+
+    if(dupFlag == 1){
+      printf("Duplicate present. Don't store\n");
+      return 1;
+    }
+    
+    return 0; // No duplicates found
 }
