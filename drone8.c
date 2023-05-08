@@ -517,6 +517,7 @@ int main(int argc, char *argv[]){
               }
               #endif
 
+              //Put tokenized messages back in the buffer
               char tempBuffer[100];
               //char overallBuffer[500];
               memset(tempBuffer, 0, 100);
@@ -525,15 +526,15 @@ int main(int argc, char *argv[]){
                 sprintf(tempBuffer, "%s:%s%s", tokens[i].key, tokens[i].value, " ");
                 strcat(storedBuffer[0].message, tempBuffer);
               }
-              //strcpy(storedBuffer[0].message, tempBuffer);
+              
+              #ifdef LAB8_TESTING
               printf("Updated stored message is %s\n", storedBuffer[0].message);
-              //strcat(buffer, tempBuffer);
-              //memset(tempBuffer, 0, 100);
+              #endif
 
               //Resend all messages after moving locations
               reSend(storedBuffer, socketDescriptor, Partners, myPort, myLoc);
 
-              printf("Location moved! Resending all stored messages\n");
+              printf("Location moved! Resent all stored messages\n");
 
               continue;
             }

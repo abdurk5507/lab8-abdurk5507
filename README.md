@@ -17,9 +17,8 @@ This program has one file, drone8.c. This file serves the purpose of both a clie
 This program will also send and receive ACKs, provide a send-path of the message, and increment with sequence numbers. The move command has also been implemented along with optimization.
 
 **Status of Program**<br>
-This program works in most scenarios. The move command works as described, but it's not clear if the optimization is working as it should.
-
-My program, however, seems to print the intiialy "enter the string you'd like to send" message many times. I am not certain as to why this occurs.
+This program appears to be working properly. Upon moving locations, the messages are resent correctly. Moreover, the messages are resent after the timeout. A function called "isDuplicate" is used
+to ensure that duplicate messages aren't stored, but I was unable to confirm if this worked in all instances.
 
 **Files Needed to Run Program**
 - drone8.c - this is the server and client file.
