@@ -12,8 +12,7 @@
 #include <time.h>
 
 //Homework 8
-//Abdur Khan
-//105071067
+//abdurk5507
 
 #define CURRENTVERSION 8
 #define MAXPARTNERS 100
