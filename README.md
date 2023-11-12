@@ -1,8 +1,8 @@
 ***READ ME***
 
 *******************************************************
-*  **Name      :**  Abdur Khan
-*  **Student ID:**  105071067
+*  **Name      :**  abdurk5507
+*  **Student ID:**  
 *  **Class     :**  CSCI 3762           
 *  **HW#       :**  Lab 8         
 *  **Due Date  :**  05/03/2023
